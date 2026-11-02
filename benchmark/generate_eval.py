@@ -1,8 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""
-Step (2) of evaluation pipeline.
+"""Step (2) of evaluation pipeline.
 
 This script recursively generates motions using Kimodo from a test suite folder tree.
 """
@@ -14,13 +13,40 @@ from typing import Any
 
 import numpy as np
 import torch
+from omegaconf import OmegaConf
 from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
 
 from kimodo.constraints import load_constraints_lst
 from kimodo.meta import parse_prompts_from_meta
 from kimodo.model import DEFAULT_MODEL, load_model
-from kimodo.tools import load_json, seed_everything
+from kimodo.model.load_model import (
+    DEFAULT_TEXT_ENCODER_URL,
+    _select_text_encoder_conf,
+    get_env_var,
+)
+from kimodo.model.loading import instantiate_from_dict
+from kimodo.tools import disable_tf32, load_json, seed_everything
+
+
+def _load_model_from_folder(model_path, device=None, text_encoder_fp32: bool = False):
+    """Load a checkpoint folder directly (not a registered model name).
+
+    Mirrors ``kimodo.model.load_model``'s CHECKPOINT_DIR flow for an explicit path.
+    """
+    model_path = Path(model_path)
+    model_conf = OmegaConf.load(model_path / "config.yaml")
+    text_encoder_url = get_env_var("TEXT_ENCODER_URL", DEFAULT_TEXT_ENCODER_URL)
+    runtime_conf = OmegaConf.create(
+        {
+            "checkpoint_dir": str(model_path),
+            "text_encoder": _select_text_encoder_conf(text_encoder_url, text_encoder_fp32),
+        }
+    )
+    model_cfg = OmegaConf.to_container(OmegaConf.merge(model_conf, runtime_conf), resolve=True)
+    model_cfg.pop("checkpoint_dir", None)
+    model = instantiate_from_dict(model_cfg, overrides={"device": device})
+    return model.eval()
 
 
 def parse_args():
@@ -53,7 +79,7 @@ def parse_args():
         "--model",
         type=str,
         default=DEFAULT_MODEL,
-        help="Name of the model (e.g. Kimodo-SOMA-RP-v1.1, kimodo-soma-rp, or SOMA).",
+        help="Kimodo model: short key (e.g. kimodo-soma-rp), full/partial name, or a full path to a checkpoint folder.",
     )
     parser.add_argument(
         "--diffusion_steps",
@@ -106,6 +132,7 @@ def copy_source_files(src_dir: Path, out_dir: Path) -> None:
 
 class EvalExampleDataset(Dataset):
     """Dataset of example folders: yields text, num_frame, constraints_path (and paths, meta).
+
     No torch/skeleton in workers so num_workers > 0 is safe with CUDA.
     """
 
@@ -203,6 +230,7 @@ def _crop_output(output: dict[str, Any], num_frames: int) -> dict[str, Any]:
 
 
 def main():
+    disable_tf32()
     device = "cuda:0" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
 
@@ -219,24 +247,33 @@ def main():
         raise SystemExit(f"No folders with meta.json found under {testsuite_root}")
     print(f"Discovered {len(examples)} example folders.")
 
-    model, resolved_name = load_model(
-        args.model,
-        device=device,
-        default_family="Kimodo",
-        return_resolved_name=True,
-        text_encoder_fp32=args.text_encoder_fp32,
-    )
-    # v1.1 models are meant to be used for benchmark evaluation
+    if Path(args.model).is_dir():
+        # A path to a checkpoint folder (not a registered short key/display name): load it
+        # directly, bypassing the model registry.
+        model = _load_model_from_folder(args.model, device=device, text_encoder_fp32=args.text_encoder_fp32)
+        resolved_name = Path(args.model).resolve().name
+    else:
+        model, resolved_name = load_model(
+            args.model,
+            device=device,
+            default_family="Kimodo",
+            return_resolved_name=True,
+            text_encoder_fp32=args.text_encoder_fp32,
+        )
+    # Models that should not be used for benchmark comparisons
     _deprecated_for_benchmark = {
-        "kimodo-soma-rp-v1": "Kimodo-SOMA-RP-v1 was not trained to be compatible with the benchmark evaluation.",
-        "kimodo-soma-seed-v1": "Kimodo-SOMA-SEED-v1 is not the latest model for benchmark evaluation.",
+        "kimodo-soma-rp-v1": "Kimodo-SOMA-RP-v1 was not trained to be compatible with the benchmark evaluation. "
+        "Consider using Kimodo-SOMA-RP-v1.2.",
+        "kimodo-soma-rp-v1.1": "Kimodo-SOMA-RP-v1.1 was trained on splits where some BONES-SEED test sequences "
+        "leaked into the training set. Consider using Kimodo-SOMA-RP-v1.2.",
+        "kimodo-soma-seed-v1": "Kimodo-SOMA-SEED-v1 is not the latest model for benchmark evaluation. "
+        "Consider using Kimodo-SOMA-SEED-v1.1.",
     }
     if resolved_name in _deprecated_for_benchmark:
         import warnings
 
         warnings.warn(
-            f"Model '{args.model}' resolved to {resolved_name}: "
-            f"{_deprecated_for_benchmark[resolved_name]} Consider using v1.1.",
+            f"Model '{args.model}' resolved to {resolved_name}: {_deprecated_for_benchmark[resolved_name]}",
             stacklevel=1,
         )
     print(f"Generating with model: {resolved_name}")

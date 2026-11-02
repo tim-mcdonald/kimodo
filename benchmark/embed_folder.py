@@ -1,10 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""
-Step (3) of evaluation pipeline.
+"""Step (3) of evaluation pipeline.
 
-This script recursively embeds generated motions, ground-truth motions, and text prompts from a test suite folder tree with the pre-trained TMR model.
+This script recursively embeds generated motions, ground-truth motions, and text prompts from a test
+suite folder tree with the pre-trained TMR model.
 """
 
 import argparse
@@ -16,7 +16,7 @@ from tqdm import tqdm
 
 from kimodo.meta import parse_prompts_from_meta
 from kimodo.model.load_model import load_model
-from kimodo.tools import load_json
+from kimodo.tools import disable_tf32, load_json
 
 
 def discover_motion_folders(root: Path) -> list[Path]:
@@ -80,8 +80,11 @@ def main():
     if not folder.is_dir():
         raise SystemExit(f"Folder does not exist or is not a directory: {folder}")
 
+    disable_tf32()
     device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
-    model = load_model(modelname=args.model, device=device, default_family="TMR", text_encoder_fp32=args.text_encoder_fp32)
+    model = load_model(
+        modelname=args.model, device=device, default_family="TMR", text_encoder_fp32=args.text_encoder_fp32
+    )
 
     dirs = discover_motion_folders(folder)
     if not dirs:

@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [2026-10-15]
+
+### Added
+- [Kimodo-SOMA-RP-v1.2](https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2) and [Kimodo-SOMA-RP-ArdyRep-v1.2](https://huggingface.co/nvidia/Kimodo-SOMA-RP-ArdyRep-v1.2) models, trained on corrected splits (some BONES-SEED test sequences had leaked into the training set of Kimodo-SOMA-RP-v1.1). Kimodo-SOMA-RP-v1.2 keeps the smooth-root motion representation, while Kimodo-SOMA-RP-ArdyRep-v1.2 predicts the Ardy motion representation (global root, raw hips as the root) for interoperability with the [ARDY](https://github.com/nv-tlabs/ardy) models. Kimodo-SOMA-RP-v1.2 is now the default model for the demo and CLI.
+- `ArdyMotionRep` motion representation, and `FeatureLayout` to declare the feature layout of a motion representation.
+- `--motion_rep {kimodo,ardy}` and `--output` options to `benchmark/create_benchmark.py`, to build the benchmark test suite for models using the Ardy motion representation.
+- `benchmark/generate_eval.py` now accepts a path to a checkpoint folder for `--model`.
+- Benchmark results for Kimodo-SOMA-RP-v1.2 and Kimodo-SOMA-RP-ArdyRep-v1.2 in the documentation.
+
+### Changed
+- **Breaking:** renamed the `ContraintFollow` metric to `ConstraintFollow`.
+- `benchmark/generate_eval.py` now warns when evaluating Kimodo-SOMA-RP-v1.1, since its training set overlaps the BONES-SEED test splits.
+- `benchmark/generate_eval.py`, `benchmark/embed_folder.py` and `benchmark/evaluate_folder.py` now disable TF32 and run float32 matmuls in full precision. Environments that enable TF32 (e.g. NGC PyTorch containers, which set `TORCH_ALLOW_TF32_CUBLAS_OVERRIDE=1`) previously gave higher foot-skate values than a standard pip install ([#52](https://github.com/nv-tlabs/kimodo/issues/52)).
+- Recomputed the Kimodo-SOMA-SEED-v1.1 and Kimodo-SOMA-RP-v1.1 benchmark results in the documentation with TF32 disabled; foot skating is about 0.3–0.4 cm/s lower than previously reported, other metrics are essentially unchanged.
+
 ## [2026-05-03]
 
 ### Fixed
