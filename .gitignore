@@ -158,3 +158,6 @@ onelogger.err
 
 # deploy files
 /helm-library
+
+# MotionCorrection CMake build artifacts
+MotionCorrection/build-mc/
